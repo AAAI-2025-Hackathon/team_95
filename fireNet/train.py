@@ -10,6 +10,16 @@ from dataset import NextDayFireDataset
 import numpy as np
 import gc
 import random
+import matplotlib.pyplot as plt
+from sklearn.metrics import (
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    roc_curve,
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -45,8 +55,8 @@ def train_next_day_fire(
     img_scale: float = 0.5,
     pos_weight: float = 3.0,
     limit_features: list = None,
-    max_train_samples: int = 100,
-    max_val_samples: int = 10,
+    max_train_samples: int = 10000,
+    max_val_samples: int = 500,
 ):
     """
     Train the ResNetUNet model for next-day fire prediction.
@@ -228,7 +238,7 @@ def dice_coeff(pred, target, smooth=1e-6):
     return (2.0 * intersection + smooth) / (pred.sum() + target.sum() + smooth)
 
 
-def load_checkpoint(checkpoint_file: str, model, optimizer=None):
+def load_checkpoint(checkpoint_file: str, model, optimizer=None,device='cpu'):
     """
     Load a checkpoint.
 
@@ -245,3 +255,98 @@ def load_checkpoint(checkpoint_file: str, model, optimizer=None):
     if optimizer:
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     return checkpoint['epoch']
+
+
+def result_analysis(
+    model,
+    test_loader,
+    device,
+    checkpoint_path,
+    save_dir='results',
+    epoch=None,
+):
+    """
+    Analyze the model's performance on the test dataset.
+
+    Args:
+        model: The trained model.
+        test_loader: DataLoader for the test dataset.
+        device: Device to use for evaluation.
+        checkpoint_path: Path to the checkpoint file.
+        save_dir: Directory to save results and figures.
+        epoch: Epoch number to load the checkpoint (optional).
+    """
+    # Create save directory
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Load the checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.to(device)
+    model.eval()
+
+    # Initialize lists to store results
+    y_true = []
+    y_pred = []
+    y_score = []
+
+    # Evaluate on the test dataset
+    with torch.no_grad():
+        for images, masks in test_loader:
+            images = images.to(device=device, dtype=torch.float32)
+            masks = masks.to(device=device, dtype=torch.float32)
+
+            # Forward pass
+            outputs = model(images)
+            preds = torch.sigmoid(outputs) > 0.5  # Binary predictions
+            scores = torch.sigmoid(outputs)  # Probabilities for AUC
+
+            # Store results
+            y_true.extend(masks.cpu().numpy().flatten())
+            y_pred.extend(preds.cpu().numpy().flatten())
+            y_score.extend(scores.cpu().numpy().flatten())
+
+    # Convert to numpy arrays
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    y_score = np.array(y_score)
+
+    # Calculate metrics
+    precision = precision_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred)
+    auc = roc_auc_score(y_true, y_score)
+
+    # Print metrics
+    print(f'Precision: {precision:.4f}')
+    print(f'Recall: {recall:.4f}')
+    print(f'F1 Score: {f1:.4f}')
+    print(f'AUC: {auc:.4f}')
+
+    # Plot ROC curve
+    fpr, tpr, _ = roc_curve(y_true, y_score)
+    plt.figure()
+    plt.plot(fpr, tpr, label=f'AUC = {auc:.4f}')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve')
+    plt.legend()
+    plt.savefig(os.path.join(save_dir, 'roc_curve.png'))
+    plt.close()
+
+    # Plot confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    disp.plot()
+    plt.title('Confusion Matrix')
+    plt.savefig(os.path.join(save_dir, 'confusion_matrix.png'))
+    plt.close()
+
+    # Save metrics to a file
+    with open(os.path.join(save_dir, 'metrics.txt'), 'w') as f:
+        f.write(f'Precision: {precision:.4f}\n')
+        f.write(f'Recall: {recall:.4f}\n')
+        f.write(f'F1 Score: {f1:.4f}\n')
+        f.write(f'AUC: {auc:.4f}\n')
+
+    print(f'Results and figures saved in {save_dir}')
