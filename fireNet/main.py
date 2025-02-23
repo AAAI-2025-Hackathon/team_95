@@ -17,7 +17,7 @@ parser = ArgumentParser()
 parser.add_argument('--seed', type=int, default=42)
 parser.add_argument('--dir_checkpoint', type=str, default='./checkpoints/')
 parser.add_argument('--epochs', type=int, default=10)
-parser.add_argument('--batch_size', type=int, default=4)
+parser.add_argument('--batch_size', type=int, default=128)
 args = parser.parse_args()
 
 # Seed everything for reproducibility
@@ -41,7 +41,7 @@ os.makedirs(dir_checkpoint, exist_ok=True)
 try:
     # Find the last modified checkpoint in the directory
     last_checkpoint = sorted(
-        [f for f in os.listdir(dir_checkpoint) if f.startswith('checkpoint')],
+        [f for f in os.listdir(dir_checkpoint) if f.find('checkpoint')],
         key=lambda f: os.path.getmtime(os.path.join(dir_checkpoint, f)),
         reverse=True,
     )[0]
@@ -51,13 +51,12 @@ except IndexError:
     print('No checkpoints found')
     load_model = None
 
-starting_epoch = 0
+starting_epoch = 37
 epochs = args.epochs
 batch_size = args.batch_size
-lr = 0.0001
+lr = 0.01
 scale = 0.5
 val_percent = 20
-amp = True
 pos_weight = 3.0
 
 # Datasets
@@ -91,8 +90,9 @@ logging.info(
 
 # Load model checkpoint if available
 if load_model:
-    state_dict, optimizer_state_dict, _, _, _ = load_checkpoint(load_model)
-    model.load_state_dict(state_dict)
+
+    cehckpoint = load_checkpoint(load_model,model=model,device=device)
+    #model.load_state_dict(state_dict)
     logging.info(f'Model loaded from {load_model}')
     logging.info(f'Starting from Epoch {starting_epoch}')
 
@@ -107,6 +107,7 @@ train_next_day_fire(
     model=model,
     epochs=epochs,
     dir_checkpoint=dir_checkpoint,
+    save_checkpoint=True,
     batch_size=batch_size,
     learning_rate=lr,
     device=device,
@@ -114,4 +115,7 @@ train_next_day_fire(
     val_percent=val_percent / 100,
     pos_weight=pos_weight,
     limit_features=limit_features,
+    max_train_samples = 10000,
+    max_val_samples= 50
 )
+

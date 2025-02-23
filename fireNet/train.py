@@ -21,6 +21,8 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay,
 )
 
+from skimage.segmentation import find_boundaries
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -167,7 +169,7 @@ def train_next_day_fire(
                     )
 
         # Save checkpoint
-        if save_checkpoint and epoch % 10 == 0:
+        if save_checkpoint:
             Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
             torch.save(
                 {
@@ -350,3 +352,99 @@ def result_analysis(
         f.write(f'AUC: {auc:.4f}\n')
 
     print(f'Results and figures saved in {save_dir}')
+
+
+
+def visualize_fire_spread(
+    model,
+    test_loader,
+    device,
+    checkpoint_path,
+    save_dir='visualizations',
+    num_pairs=3,
+    cmap='gray',
+):
+    """
+    Visualize Today's image, Next Day's prediction, and Fire Spread in a single figure.
+
+    Args:
+        model: The trained model.
+        test_loader: DataLoader for the test dataset.
+        device: Device to use for evaluation.
+        checkpoint_path: Path to the checkpoint file.
+        save_dir: Directory to save visualizations.
+        num_pairs: Number of image pairs to visualize.
+    """
+    # Create save directory
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Load the checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.to(device)
+    model.eval()
+
+    # Select the most useful image pairs
+    useful_pairs = []
+    with torch.no_grad():
+        for images, masks in test_loader:
+            images = images.to(device=device, dtype=torch.float32)
+            masks = masks.to(device=device, dtype=torch.float32)
+
+            # Forward pass
+            outputs = model(images)
+            #print(f'max and min of outputs: {torch.max(outputs)}, {torch.min(outputs)}')
+            preds = torch.sigmoid(outputs) > 0.5  # Binary predictions
+            #print(f'max and min of preds: {torch.max(preds)}, {torch.min(preds)}')
+            # Convert masks to boolean for bitwise operations
+            masks_bool = masks.cpu().numpy() > 0.5  # Threshold to convert to boolean
+            preds_bool = preds.cpu().numpy() > 0.5  # Ensure preds are boolean
+            print(f' total number of pred fire pixels: {np.sum(preds_bool)}')
+
+            # Compute Fire Spread (new fire regions)
+            fire_spread = preds_bool & ~masks_bool  # Use boolean arrays
+
+            # Store the most useful pairs
+            for i in range(len(images)):
+                if np.sum(fire_spread[i]) > 0:  # Only select pairs with new fire pixels
+                    useful_pairs.append({
+                        'today': masks[i].cpu().numpy()[0],  # Today's fire mask
+                        'next_day': preds[i].cpu().numpy()[0],  # Next Day's prediction
+                        'fire_spread': fire_spread[i][0],  # Fire Spread (new fire pixels)
+                    })
+                    if len(useful_pairs) >= num_pairs:
+                        break
+            if len(useful_pairs) >= num_pairs:
+                break
+
+    # Create a single figure with 3 rows and 3 columns
+    fig, axes = plt.subplots(num_pairs, 3, figsize=(15, 5 * num_pairs))
+
+    # Plot each pair
+    for i, pair in enumerate(useful_pairs):
+        # Today's Fire Mask
+        axes[i, 0].imshow(pair['today'], cmap=cmap, vmin=0, vmax=1)
+        axes[i, 0].set_title("Today's Fire Mask")
+        axes[i, 0].axis('off')
+
+        # Next Day's Prediction
+        axes[i, 1].imshow(pair['next_day'], cmap=cmap, vmin=0, vmax=1)
+        axes[i, 1].set_title("Next Day's Prediction")
+        axes[i, 1].axis('off')
+
+        # Fire Spread (Highlight new fire pixels with red boundary)
+        if np.sum(pair['fire_spread']) > 0:  # Only highlight if there are new fire pixels
+            fire_spread_boundary = find_boundaries(pair['fire_spread'], mode='inner')
+            axes[i, 2].imshow(pair['next_day'], cmap=cmap, vmin=0, vmax=1)  # Base image
+            axes[i, 2].contour(fire_spread_boundary, colors='red', linewidths=1)  # Red boundary
+        else:
+            axes[i, 2].imshow(pair['next_day'], cmap=cmap, vmin=0, vmax=1)  # Base image
+        axes[i, 2].set_title("Fire Spread (Highlighted)")
+        axes[i, 2].axis('off')
+
+    # Save the figure
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'fire_spread_comparison.png'), bbox_inches='tight', dpi=300)
+    plt.close()
+
+    print(f'Visualization saved in {save_dir}')
