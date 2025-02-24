@@ -1,5 +1,6 @@
 # Check-In
-
+- Selected Theme; 
+  Sustainable AI: Innovate around climate change mitigation, energy efficiency, and sustainability through AI.
 - Title of your submission: Harnessing Geospatial AI for Wildfire Prediction: A Deep Learning Approach to Mitigate Disaster Risks.
 - Team Members: [Rupasree Dey](mailto:rupasree.dey@colostate.edu), [Andrei Bachinin](mailto:andrei.bachinin@colostate.edu), [Abdul Matin](mailto:abdul.matin@colostate.edu), [Tanjim Faruk](mailto:tanjim.faruk@colostate.edu)
 - [x] All team members agree to abide by the [Hackathon Rules](https://aaai.org/conference/aaai/aaai-25/hackathon/)
